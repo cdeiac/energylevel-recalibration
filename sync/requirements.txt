@@ -1,0 +1,5 @@
+FastAPI~=0.88.0
+starlette~=0.22.0
+uvicorn~=0.20.0
+httpx~=0.23.1
+requests==2.28.2

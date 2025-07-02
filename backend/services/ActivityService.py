@@ -1,9 +1,4 @@
-import datetime
 import logging
-from typing import List
-
-import pandas as pd
-
 from mappings.ActivityMapper import ActivityMapper
 from mappings.StepsMapper import StepsMapper
 from repositories.ActivityRepository import ActivityRepository
@@ -26,7 +21,7 @@ class ActivityService:
         # map DTO to schema model, save steps and activities separately
         for activity in activities.activities:
             # map activity
-            activity_entry = ActivityMapper.from_activity(activity)
+            activity_entry = ActivityMapper.to_schema(activity)
             activity_json = activity_entry.to_json()
             self.__log.debug(activity_json)
             activity_entries.append(activity_json)
@@ -38,13 +33,13 @@ class ActivityService:
         await self.__steps_repository.save_many(steps_entries)
         return activity_entries
 
-    async def find_many(self, userId: str, timeStart: datetime, timeEnd: datetime):
+    async def find_many(self, userId: str, start: int, end: int):
         # parameter validation
-        if not timeStart <= timeEnd:
-            raise ValueError('timeStart must be before timeEnd!')
+        if not start <= end:
+            raise ValueError('start must be before end!')
 
         # find entries
-        result = await self.__activity_repository.find(userId, timeStart, timeEnd)
+        result = await self.__activity_repository.find(userId, start, end)
         # map entries
         return [Activity.parse_obj(res) for res in result]
 
@@ -58,32 +53,7 @@ class ActivityService:
         # find entries
         result = await self.find_all(userId)
         # map to dataframe
-        return self.__map_to_dataframe(result)
-
-
-    def __map_to_dataframe(self, data: List[Activity]):
-        df = pd.DataFrame({
-            'summaryId': pd.Series(dtype='str'),
-            'activityType': pd.Series(dtype='str'),
-            'timeStart': pd.Series(dtype='int'),
-            'timeEnd': pd.Series(dtype='int'),
-            'steps': pd.Series(dtype='int'),
-            'calendarDate': pd.Series(dtype='str'),
-            'dayOfWeek': pd.Series(dtype='int'),
-            'month': pd.Series(dtype='int')})
-
-        df['summaryId'] = [d.summaryId for d in data]
-        df['activityType'] = [d.activityType for d in data]
-        df['timeStart'] = [d.startTimeOffsetInSeconds for d in data]
-        df['timeEnd'] = [d.endTimeOffsetInSeconds for d in data]
-        df['steps'] = [d.steps for d in data]
-        df['calendarDate'] = [d.calendarDate for d in data]
-        df['dayOfWeek'] = [d.dayOfWeek for d in data]
-        df['month'] = [d.month for d in data]
-
-        df['timeStart'] = pd.to_datetime(df['timeStart'], unit='s')
-        df['timeEnd'] = pd.to_datetime(df['timeEnd'], unit='s')
-        return df
+        return ActivityMapper.to_dataframe(data=result)
 
 
     @staticmethod

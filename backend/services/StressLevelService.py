@@ -1,74 +1,100 @@
 import logging
-from datetime import datetime
-from typing import List
-
-import pandas as pd
-
-from mappings.StressMapper import StressLevelMapper
+from mappings.StressLevelMapper import StressLevelMapper
 from repositories.StressLevelRepository import StressLevelRepository
 from schemas.stress import StressLevel
 
 
 class StressLevelService:
+    """
+    Service layer for handling operations related to user stress level data.
+    Supports saving new entries, retrieving data, and converting results into a DataFrame.
+    """
+
     __log = logging.getLogger(__name__)
     __repository = StressLevelRepository()
 
     async def save_many(self, stressDetails):
-        # early return
+        """
+        Saves multiple stress level entries from DTO, filtered to 15-minute intervals.
+
+        Parameters:
+        -----------
+        stressDetails : StressDetails
+            DTO containing stress level values mapped by timestamp offset.
+
+        Returns:
+        --------
+        StressDetails
+            The original input after processing and saving entries.
+        """
         if not stressDetails.stressDetails:
             return {}
 
         stressEntries = []
-        # map DTO to schema model
         for stressDetail in stressDetails.stressDetails:
-
             for key, value in stressDetail.timeOffsetStressLevelValues.items():
-                # map entry
-                stressEntry = StressLevelMapper.from_stress_detail(stressDetail, key, value).to_json()
-                self.__log.debug(stressEntry)
-                stressEntries.append(stressEntry)
-        # save
-        await self.__repository.save_many(stressEntries)
+                if int(key) % 900 == 0:  # Save every 15 minutes
+                    stressEntry = StressLevelMapper.from_stress_detail(stressDetail, key, value).to_json()
+                    self.__log.debug(stressEntry)
+                    stressEntries.append(stressEntry)
+
+        await self.__repository.save_many(sorted(stressEntries, key=lambda e: e['timestamp']))
         return stressDetails
 
-    async def find_many(self, userId: str, timeStart: datetime, timeEnd: datetime):
-        # parameter validation
-        if not timeStart <= timeEnd:
+    async def find_many(self, userId: str, start: int, end: int):
+        """
+        Retrieves stress level records within a specified time range for a user.
+
+        Parameters:
+        -----------
+        userId : str
+            The unique identifier of the user.
+        start : int
+            Start time in epoch seconds (inclusive).
+        end : int
+            End time in epoch seconds (inclusive).
+
+        Returns:
+        --------
+        List[StressLevel]
+            A list of parsed stress level entries.
+        """
+        if not start <= end:
             raise ValueError('timeStart must be before timeEnd!')
 
-        # find entries
-        result = await self.__repository.find_many(userId, timeStart, timeEnd)
-        # map entries
+        result = await self.__repository.find_many(userId, start, end)
         return [StressLevel.parse_obj(res) for res in result]
 
     async def find_all(self, userId: str):
-        # find entries
+        """
+        Retrieves all stress level records for a user.
+
+        Parameters:
+        -----------
+        userId : str
+            The user's unique identifier.
+
+        Returns:
+        --------
+        List[StressLevel]
+            All stress entries for the specified user.
+        """
         result = await self.__repository.find_all(userId)
-        # map entries
         return [StressLevel.parse_obj(res) for res in result]
 
     async def find_all_to_dataframe(self, userId: str):
-        # find entries
+        """
+        Retrieves all stress data for a user and returns it as a pandas DataFrame.
+
+        Parameters:
+        -----------
+        userId : str
+            The user's unique identifier.
+
+        Returns:
+        --------
+        DataFrame
+            Structured stress data including timestamp, value, and calendar info.
+        """
         result = await self.find_all(userId)
-        # map to dataframe
-        return self.__map_to_dataframe(result)
-
-    def __map_to_dataframe(self, data: List[StressLevel]):
-        df = pd.DataFrame({
-            'summaryId': pd.Series(dtype='str'),
-            'timestamp': pd.Series(dtype='int'),
-            'stressLevel': pd.Series(dtype='int'),
-            'calendarDate': pd.Series(dtype='str'),
-            'dayOfWeek': pd.Series(dtype='int'),
-            'month': pd.Series(dtype='int')})
-
-        df['summaryId'] = [d.summaryId for d in data]
-        df['stressLevel'] = [d.value for d in data]
-        df['timestamp'] = [d.timestamp for d in data]
-        df['calendarDate'] = [d.calendarDate for d in data]
-        df['dayOfWeek'] = [d.dayOfWeek for d in data]
-        df['month'] = [d.month for d in data]
-
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-        return df
-
+        return StressLevelMapper.to_dataframe(data=result)

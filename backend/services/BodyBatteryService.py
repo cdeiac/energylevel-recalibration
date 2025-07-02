@@ -1,9 +1,5 @@
-import datetime
 import logging
 from typing import List
-
-import pandas as pd
-
 from mappings.BodyBatteryMapper import BodyBatteryMapper
 from repositories.BodyBatteryLabelsRepository import BodyBatteryLabelsRepository
 from repositories.BodyBatteryRepository import BodyBatteryRepository
@@ -12,75 +8,151 @@ from schemas.bodyBattery import BodyBattery
 
 
 class BodyBatteryService:
+    """
+    Service class for managing body battery data including ingestion, retrieval,
+    labeling, prediction storage, and DataFrame transformation.
+    """
+
     __log = logging.getLogger(__name__)
     __repository = BodyBatteryRepository()
     __label_repository = BodyBatteryLabelsRepository()
 
     async def save_many(self, stressDetails):
-        # early return
+        """
+        Processes and saves body battery entries from stress detail input.
+
+        Parameters:
+        -----------
+        stressDetails : StressDetails
+            DTO containing stress details and timeOffsetBodyBatteryValues.
+
+        Returns:
+        --------
+        StressDetails
+            The original DTO after saving mapped entries.
+        """
         if not stressDetails.stressDetails:
             return {}
 
         bodyBatteryEntries = []
-        # map DTO to schema model
         for stressDetail in stressDetails.stressDetails:
-
             for key, value in stressDetail.timeOffsetBodyBatteryValues.items():
-                # map entry
-                bodyBatteryEntry = BodyBatteryMapper.from_stress_detail(stressDetail, key, value).to_json()
-                self.__log.debug(bodyBatteryEntry)
-                bodyBatteryEntries.append(bodyBatteryEntry)
-        # save
-        await self.__repository.save_many(bodyBatteryEntries)
+                if int(key) % 900 == 0:  # Save every 15 minutes
+                    bodyBatteryEntry = BodyBatteryMapper.from_stress_detail(stressDetail, key, value).to_json()
+                    self.__log.debug(bodyBatteryEntry)
+                    bodyBatteryEntries.append(bodyBatteryEntry)
+
+        await self.__repository.save_many(sorted(bodyBatteryEntries, key=lambda e: e['timestamp']))
         return stressDetails
 
-    async def find_many(self, userAccessToken: str, timeStart: datetime, timeEnd: datetime):
-        # parameter validation
-        if not timeStart <= timeEnd:
+    async def find_many(self, userAccessToken: str, start: int, end: int):
+        """
+        Retrieves body battery entries within a specific time range.
+
+        Parameters:
+        -----------
+        userAccessToken : str
+            The user's access token.
+        start : int
+            Start timestamp (inclusive).
+        end : int
+            End timestamp (inclusive).
+
+        Returns:
+        --------
+        List[BodyBattery]
+            Parsed body battery entries in the specified time range.
+        """
+        if not start <= end:
             raise ValueError('timeStart must be before timeEnd!')
 
-        # find entries
-        result = await self.__repository.find_many(userAccessToken, timeStart, timeEnd)
-        # map entries
-        return [BodyBattery.parse_obj(res) for res in result]
+        result = await self.__repository.find_many(userAccessToken, start, end)
+        entries = [BodyBattery.parse_obj(res) for res in result]
+        return entries
 
     async def find_all(self, userId: str):
-        # find entries
+        """
+        Retrieves all body battery entries for a given user.
+
+        Parameters:
+        -----------
+        userId : str
+            The user's unique identifier.
+
+        Returns:
+        --------
+        List[BodyBattery]
+            All stored body battery records for the user.
+        """
         result = await self.__repository.find_all(userId)
-        # map entries
         entries = [BodyBattery.parse_obj(res) for res in result]
-        # if there is a label, we set it as value for the returned entries
-        for entry in entries:
-            if entry.label is not None:
-                entry.value = entry.label
         return entries
 
     async def find_all_to_dataframe(self, userId: str):
-        # find entries
+        """
+        Retrieves all body battery entries for a user and converts them to a DataFrame.
+
+        Parameters:
+        -----------
+        userId : str
+            The user's unique identifier.
+
+        Returns:
+        --------
+        DataFrame
+            A pandas DataFrame of all body battery records.
+        """
         result = await self.find_all(userId)
-        # map to dataframe
-        return self.__map_to_dataframe(result)
+        return BodyBatteryMapper.to_dataframe(data=result)
 
     async def label_body_battery(self, userId: str, labels: List[BodyBatteryLabel]):
+        """
+        Applies manual labels to the user's body battery data.
+
+        Parameters:
+        -----------
+        userId : str
+            The user's unique identifier.
+        labels : List[BodyBatteryLabel]
+            A list of labels to update in the dataset.
+
+        Returns:
+        --------
+        Any
+            Result from the repository update operation.
+        """
         return await self.__label_repository.update_many(userId, labels)
 
+    async def reset_all_body_battery_labels(self, userId: str):
+        """
+        Removes all manual labels from a user's body battery records.
 
-    def __map_to_dataframe(self, data: List[BodyBattery]):
-        df = pd.DataFrame({
-            'summaryId': pd.Series(dtype='str'),
-            'timestamp': pd.Series(dtype='int'),
-            'bodyBattery': pd.Series(dtype='int'),
-            'calendarDate': pd.Series(dtype='str'),
-            'dayOfWeek': pd.Series(dtype='int'),
-            'month': pd.Series(dtype='int')})
+        Parameters:
+        -----------
+        userId : str
+            The user's unique identifier.
 
-        df['summaryId'] = [d.summaryId for d in data]
-        df['bodyBattery'] = [d.value for d in data]
-        df['timestamp'] = [d.timestamp for d in data]
-        df['calendarDate'] = [d.calendarDate for d in data]
-        df['dayOfWeek'] = [d.dayOfWeek for d in data]
-        df['month'] = [d.month for d in data]
+        Returns:
+        --------
+        Any
+            Result from the repository reset operation.
+        """
+        return await self.__label_repository.reset_many(userId)
 
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-        return df
+    async def add_body_battery_predictions(self, userId: str, labels: List[BodyBatteryLabel]):
+        """
+        Adds prediction labels to a user's body battery data.
 
+        Parameters:
+        -----------
+        userId : str
+            The user's unique identifier.
+        labels : List[BodyBatteryLabel]
+            A list of predicted labels to update.
+
+        Returns:
+        --------
+        Any
+            Result from the repository update operation.
+        """
+        return await self.__label_repository.update_predictions(userId, labels)

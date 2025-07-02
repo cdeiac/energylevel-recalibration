@@ -3,7 +3,7 @@
 Garmin's Body Battery is often considered as a fun gimmick and rarely do athletes take it into consideration when 
 planning their training. One 
 This application accesses personal health data
-Garmin has a feature known as the Body BatteryTM model, which estimates a person’s energy level based on their 
+Garmin has a feature known as the Body Battery model, which estimates a person’s energy level based on their 
 individual health data. The model takes into account factors such as sleep, stress, and physical activity to provide 
 an overall assessment of the wearer’s energy levels. This feature provides interesting insights into a
 person’s well-being, however it is often considered as a fun gimmick for the following reasons. First, the model is 
